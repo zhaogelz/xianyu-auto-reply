@@ -1,0 +1,175 @@
+# 1. 使用 Ubuntu 24.04 (noble) 作为基础，它提供 GLIBC 2.38
+FROM ubuntu:noble
+
+# 设置标签信息
+LABEL maintainer="zhinianboke"
+LABEL version="2.2.0"
+LABEL description="闲鱼自动回复系统 - 企业级多用户版本，支持自动发货和免拼发货"
+LABEL repository="https://github.com/zhinianboke/xianyu-auto-reply"
+LABEL license="仅供学习使用，禁止商业用途"
+LABEL author="zhinianboke"
+LABEL build-date=""
+LABEL vcs-ref=""
+
+# 设置工作目录
+WORKDIR /app
+
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV TZ=Asia/Shanghai
+ENV DOCKER_ENV=true
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# Nuitka编译优化
+ENV CC=gcc
+ENV CXX=g++
+ENV NUITKA_CACHE_DIR=/tmp/nuitka-cache
+# 设置为非交互模式，防止 apt-get 安装时卡住
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- 修改开始 ---
+# 安装系统依赖
+RUN apt-get update && \
+    # 1. 先安装 'software-properties-common' (它提供了 add-apt-repository)
+    apt-get install -y --no-install-recommends software-properties-common && \
+    # 2. 添加 deadsnakes PPA，它包含了 python3.11
+    add-apt-repository ppa:deadsnakes/ppa && \
+    # 3. 再次更新 apt 缓存以包含新的 PPA
+    apt-get update && \
+    # 4. 现在安装所有依赖
+    apt-get install -y --no-install-recommends \
+        # Python (来自 PPA)
+        python3.11 \
+        python3-pip \
+        # 基础工具
+        nodejs \
+        npm \
+        tzdata \
+        curl \
+        ca-certificates \
+        # 编译工具（Nuitka需要）
+        build-essential \
+        gcc \
+        g++ \
+        ccache \
+        patchelf \
+        # 图像处理依赖
+        libjpeg-dev \
+        libpng-dev \
+        libfreetype6-dev \
+        fonts-dejavu-core \
+        fonts-liberation \
+        # Playwright浏览器依赖
+        libnss3 \
+        libnspr4 \
+        libatk-bridge2.0-0 \
+        libdrm2 \
+        libxkbcommon0 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxrandr2 \
+        libgbm1 \
+        libxss1 \
+        # <-- 修复：将 libasound2 改为 libasound2t64
+        libasound2t64 \
+        libatspi2.0-0 \
+        libgtk-3-0 \
+        libgdk-pixbuf2.0-0 \
+        libxcursor1 \
+        libxi6 \
+        libxrender1 \
+        libxext6 \
+        libx11-6 \
+        libxft2 \
+        libxinerama1 \
+        libxtst6 \
+        libappindicator3-1 \
+        libx11-xcb1 \
+        libxfixes3 \
+        xdg-utils \
+        chromium \
+        # OpenCV运行时依赖
+        libgl1 \
+        libglib2.0-0 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /tmp/* \
+    && rm -rf /var/tmp/*
+# --- 修改结束 ---
+
+# --- 修复：添加 -f (force) 标志以覆盖已存在的链接 ---
+RUN ln -sf /usr/bin/python3.11 /usr/bin/python \
+ && ln -sf /usr/bin/python3.11 /usr/bin/python3 \
+ && ln -sf /usr/bin/pip3 /usr/bin/pip
+
+# 设置时区
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# 验证Node.js和Python的安装并设置环境变量
+RUN node --version && npm --version && python --version && pip --version
+ENV NODE_PATH=/usr/lib/node_modules
+
+# 复制requirements.txt并安装Python依赖
+COPY requirements.txt .
+# --- 修复：使用 --ignore-installed 强制覆盖 apt 安装的旧版包 ---
+RUN pip install --no-cache-dir --upgrade --ignore-installed setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt
+
+# 复制项目文件
+COPY . .
+
+# 条件执行：如果 xianyu_slider_stealth.py 存在，则编译为二进制模块
+RUN if [ -f "utils/xianyu_slider_stealth.py" ]; then \
+        echo "===================================="; \
+        echo "检测到 xianyu_slider_stealth.py"; \
+        echo "开始编译为二进制模块..."; \
+        echo "===================================="; \
+        pip install --no-cache-dir nuitka ordered-set zstandard && \
+        python build_binary_module.py; \
+        BUILD_RESULT=$?; \
+        if [ $BUILD_RESULT -eq 0 ]; then \
+            echo "===================================="; \
+            echo "✓ 二进制模块编译成功"; \
+            echo "===================================="; \
+            ls -lh utils/xianyu_slider_stealth.* 2>/dev/null || true; \
+        else \
+            echo "===================================="; \
+            echo "✗ 二进制模块编译失败 (错误码: $BUILD_RESULT)"; \
+            echo "将继续使用 Python 源代码版本"; \
+            echo "===================================="; \
+        fi; \
+        rm -rf /tmp/nuitka-cache utils/xianyu_slider_stealth.build utils/xianyu_slider_stealth.dist; \
+    else \
+        echo "===================================="; \
+        echo "未检测到 xianyu_slider_stealth.py"; \
+        echo "跳过二进制编译"; \
+        echo "===================================="; \
+    fi
+
+# 安装Playwright浏览器（必须在复制项目文件之后）
+RUN playwright install chromium && \
+    playwright install-deps chromium
+
+# 创建必要的目录并设置权限
+RUN mkdir -p /app/logs /app/data /app/backups /app/static/uploads/images && \
+    chmod 777 /app/logs /app/data /app/backups /app/static/uploads /app/static/uploads/images
+
+# 配置系统限制，防止core文件生成
+RUN echo "ulimit -c 0" >> /etc/profile
+
+# 注意: 为了简化权限问题，使用root用户运行
+# 在生产环境中，建议配置适当的用户映射
+
+# 暴露端口
+EXPOSE 8080
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# 复制启动脚本
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# 启动命令
+CMD ["/app/entrypoint.sh"]
