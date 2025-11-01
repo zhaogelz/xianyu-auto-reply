@@ -1283,7 +1283,7 @@ class XianyuLive:
                                     slider.login_with_password_headful,
                                     account=username,
                                     password=password,
-                                    show_browser=True
+                                    show_browser=show_browser
                                 )
                                 
                                 if result:
@@ -1447,7 +1447,7 @@ class XianyuLive:
                     # user_id=f"{self.cookie_id}_{int(time.time() * 1000)}",  # 使用唯一ID避免冲突
                     user_id=f"{self.cookie_id}",  # 使用唯一ID避免冲突
                     enable_learning=True,  # 启用学习功能
-                    headless=False # 强制使用有头模式（前台显示）
+                    headless=True  # 使用有头模式（可视化浏览器）
                 )
 
                 # 在线程池中执行滑块验证
@@ -2002,7 +2002,7 @@ class XianyuLive:
                 ])
 
             browser = await playwright.chromium.launch(
-                headless=False,
+                headless=True,
                 args=browser_args
             )
 
@@ -3636,7 +3636,7 @@ class XianyuLive:
                 logger.debug(f"【{self.cookie_id}】使用Cookie长度: {len(cookie_string) if cookie_string else 0}")
 
                 # 确定是否使用有头模式（调试用）
-                headless_mode = False # 强制使用有头模式（前台显示）
+                headless_mode = True if debug_headless is None else debug_headless
                 if not headless_mode:
                     logger.info(f"【{self.cookie_id}】🖥️ 启用有头模式进行调试")
 
@@ -4794,7 +4794,7 @@ class XianyuLive:
 
             # 使用无头浏览器
             browser = await playwright.chromium.launch(
-                headless=False,  # 改回无头模式
+                headless=True,  # 改回无头模式
                 args=browser_args
             )
 
@@ -5145,7 +5145,7 @@ class XianyuLive:
 
             # Cookie刷新模式使用无头浏览器
             browser = await playwright.chromium.launch(
-                headless=False,
+                headless=True,
                 args=browser_args
             )
 
